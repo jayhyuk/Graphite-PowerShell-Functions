@@ -1,29 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Configuration>
 	<Graphite>
-		<CarbonServer>yourCarbonServerNameOrIP</CarbonServer>
-		<CarbonServerPort>2003</CarbonServerPort>
-		<MetricPath>datacenter1.servers</MetricPath>
+		<CarbonServer>HK-CASMON-2001</CarbonServer>
+		<CarbonServerPort>56660</CarbonServerPort>
+		<MetricPath>hk.mdb.mdb</MetricPath>
 		<NodeHostName>$env:COMPUTERNAME</NodeHostName>
-		<MetricSendIntervalSeconds>5</MetricSendIntervalSeconds>
+		<MetricPath2>windows</MetricPath2>
+		<MetricSendIntervalSeconds>60</MetricSendIntervalSeconds>
 		<SendUsingUDP>False</SendUsingUDP>
 	</Graphite>
-	<PerformanceCounters>
-		<Counter Name="\Network Interface(*)\Bytes Received/sec"/>
-		<Counter Name="\Network Interface(*)\Bytes Sent/sec"/>
-		<Counter Name="\Network Interface(*)\Packets Received Unicast/sec"/>
-		<Counter Name="\Network Interface(*)\Packets Sent Unicast/sec"/>
-		<Counter Name="\Network Interface(*)\Packets Received Non-Unicast/sec"/>
-		<Counter Name="\Network Interface(*)\Packets Sent Non-Unicast/sec"/>
-		<Counter Name="\Processor(_Total)\% Processor Time"/>
-		<Counter Name="\Memory\Available MBytes"/>
-		<Counter Name="\Memory\Pages/sec"/>
-		<Counter Name="\Memory\Pages Input/sec"/>
+	<PerformancesMetrics>
+		<PerformanceCounter>
+		<PerformanceCounters>
+		<MetricSendIntervalSecond>60</MetricSendIntervalSecond>		
+		<!-- OS PART -->
+		<!-- CPU-->
+		<Counter Name="\Processor(*)\% Processor Time"/>
 		<Counter Name="\System\Processor Queue Length"/>
 		<Counter Name="\System\Threads"/>
-		<Counter Name="\PhysicalDisk(*)\Avg. Disk Write Queue Length"/>
-		<Counter Name="\PhysicalDisk(*)\Avg. Disk Read Queue Length"/>
-	</PerformanceCounters>
+		<!-- Memory-->
+		<Counter Name="\Memory\Available MBytes"/>
+		<Counter Name="\Memory\Pages/sec"/>
+		<Counter Name="\Memory\Cache Bytes"/>
+		<!-- Disk-->	
+           	<Counter Name="\LogicalDisk(*)\% Free Space"/>	
+           	<Counter Name="\LogicalDisk(*)\Free Megabytes"/>
+		<Counter Name="\LogicalDisk(*)\Avg. Disk Bytes/Read"/>
+		<Counter Name="\LogicalDisk(*)\Avg. Disk Bytes/Write"/>
+		<Counter Name="\LogicalDisk(*)\AVG. Disk sec/Write"/>
+		<Counter Name="\LogicalDisk(*)\AVG. Disk sec/Read"/>
+		<Counter Name="\LogicalDisk(*)\Disk Writes/sec"/>
+		<Counter Name="\LogicalDisk(*)\Disk Reads/sec"/>
+		<Counter Name="\LogicalDisk(*)\Current Disk Queue Length"/>
+		</PerformanceCounters>
+		</PerformanceCounter>	
+	</PerformancesMetrics>
+	
 	<MetricCleaning>
 		<!-- These will be found and replaced in the order they appear here -->
 		<MetricReplace This="physicaldisk\(.* (.*)\:\)" With="physicaldisk.#{CAPTUREGROUP}-drive"/>
@@ -48,29 +60,24 @@
 		<MetricReplace This="\.intel[a-zA-Z0-9]+\." With=".intel."/>
 		<MetricReplace This="\.realtek[a-zA-Z0-9]+\." With=".realtek."/>
 		<MetricReplace This="\.memory\." With=".mem."/>
+		<MetricReplace This="\$" With="_"/>
 	</MetricCleaning>
 	<Filtering>
 		<MetricFilter Name="isatap"/>
 		<MetricFilter Name="teredo tunneling"/>
 	</Filtering>
 	<MSSQLMetics>
-		<MetricPath>datacenter1.sqlmetrics</MetricPath>
-		<MetricSendIntervalSeconds>60</MetricSendIntervalSeconds>
-		<SQLConnectionTimeoutSeconds>5</SQLConnectionTimeoutSeconds>
-		<SQLQueryTimeoutSeconds>5</SQLQueryTimeoutSeconds>
+	<MetricPath></MetricPath>
+	<MetricSendIntervalSeconds>60</MetricSendIntervalSeconds>
+		<SQLConnectionTimeoutSeconds>10</SQLConnectionTimeoutSeconds>
+		<SQLQueryTimeoutSeconds>10</SQLQueryTimeoutSeconds>
 		<SQLServers>
-			<!-- A SQL Server Connection Using SQL Authentication -->
-			<SQLServer ServerInstance="(localdb)\v11.0" Username="sa" Password="PASSWORD1!">
-				<Query Database="mydb" MetricName="mydb.userlist.rowcount" TSQL="select count(userListID) From [dbo].[userList]"/>
-				<Query Database="mydb" MetricName="mydb.userlist.ukemails" TSQL="select count(userListID) From [dbo].[userList] Where Emails like '%.uk%'"/>
-			</SQLServer>
-			<!-- A SQL Server Connection Using Windows Authentication. The credentials from the running PowerShell session will be used. -->
-			<SQLServer ServerInstance="MSSQLServer" Username="" Password="">
-				<Query Database="citydb" MetricName="citydb.cities.navadwipkota" TSQL="Select COUNT (city) from [dbo].[cities] Where City = 'Navadwip' OR City = 'Kota'"/>
-				<!-- An example query SQL query using a greater-than symbol. The symbol must be replaced with an XML Entity References. List here - http://msdn.microsoft.com/en-us/library/windows/desktop/dd892769%28v=vs.85%29.aspx -->
-				<Query Database="addressbook" MetricName="people.ages.over30" TSQL="Select COUNT (personid) from [dbo].[tblAddressBook] Where Age &gt; 30"/>
-			</SQLServer>
+			<sqlServer ServerInstance="instancename" Username="username" Password="password">
+				<StoreProcedure Database="databasename" StoreName="storeproc"/>			
+
+			</sqlServer>		
 		</SQLServers>
+		
 	</MSSQLMetics>
 	<Logging>
 		<VerboseOutput>True</VerboseOutput>
