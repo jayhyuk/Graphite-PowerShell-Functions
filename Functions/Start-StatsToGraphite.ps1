@@ -54,11 +54,15 @@ Function Start-StatsToGraphite
         [switch]$SqlMetrics = $false
     )
 
+
+
     # Run The Load XML Config Function
     $Config = Import-XMLConfig -ConfigPath $configPath
 
     # Get Last Run Time
     $sleep = 0
+    $oldsumOfelapsedtimerequest =0
+    $oldsumOfelapsedtime = 0
 
     $configFileLastWrite = (Get-Item -Path $configPath).LastWriteTime
 
@@ -70,7 +74,9 @@ Function Start-StatsToGraphite
         if ($Config.MSSQLServers.Length -gt 0)
         {
             # Check for SQLPS Module
-            if (($listofSQLModules = Get-Module -List SQLPS).Length -eq 1)
+			$listofSQLModules = Get-Module -List SQLPS
+			write-verbose($listofSQLModules)
+            if ($listofSQLModules -ne $null)
             {
                 # Load The SQL Module
                 Import-Module SQLPS -DisableNameChecking
@@ -95,31 +101,46 @@ Function Start-StatsToGraphite
         }
     }
 
+	$elapseTime =999999;
+	
     # Start Endless Loop
     while ($true)
     {
+
+     $iterationStopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+        $nowUtc = [datetime]::UtcNow
+
+        $timeNext = (Get-Date).AddMinutes(1) 
         # Loop until enough time has passed to run the process again.
         if($sleep -gt 0) {
             Start-Sleep -Milliseconds $sleep
         }
 
-        # Used to track execution time
-        $iterationStopWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-        $nowUtc = [datetime]::UtcNow
+        # Used to track execution time
+       
 
         # Round Time to Nearest Time Period
-        $nowUtc = $nowUtc.AddSeconds(- ($nowUtc.Second % $Config.MetricSendIntervalSeconds))
-
+       
         $metricsToSend = @{}
+		$metricsTime = @{}
+        
 
         if(-not $ExcludePerfCounters)
         {
-            # Take the Sample of the Counter
-            $collections = Get-Counter -Counter $Config.Counters -SampleInterval 1 -MaxSamples 1
 
+            foreach($PerformanceCounter in  $Config.PerformanceCounter){
+			if($PerformanceCounter.ElapseTime -gt $PerformanceCounter.MetricTimeSpan.TotalMilliseconds ){
+            $perFormanceCounter.ElapseTime =0
+            Write-Warning $PerformanceCounter.MetricTimeSpan.TotalMilliseconds;
+            # Take the Sample of the Counter
+            Write-Warning $PerformanceCounter.Counters.Length;
+            $collections = Get-Counter -Counter $PerformanceCounter.Counters -SampleInterval 1 -MaxSamples 1
             # Filter the Output of the Counters
             $samples = $collections.CounterSamples
+
+        
 
             # Verbose
             Write-Verbose "All Samples Collected"
@@ -131,7 +152,6 @@ Function Start-StatsToGraphite
                 {
                     Write-Verbose "Sample Name: $($sample.Path)"
                 }
-
                 # Create Stopwatch for Filter Time Period
                 $filterStopWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -140,11 +160,20 @@ Function Start-StatsToGraphite
                 {
                     # Run the sample path through the ConvertTo-GraphiteMetric function
                     $cleanNameOfSample = ConvertTo-GraphiteMetric -MetricToClean $sample.Path -HostName $Config.NodeHostName -MetricReplacementHash $Config.MetricReplace
-
+                    
                     # Build the full metric path
-                    $metricPath = $Config.MetricPath + '.' + $cleanNameOfSample
-
+                    if( $cleanNameOfSample.indexOf('sql') -eq -1){
+                    $metricPath = ($Config.MetricPath +'.' + ( $cleanNameOfSample  -replace $Config.NodeHostName,($Config.NodeHostName+'.os.'+$Config.MetricPath2))).ToLower()
+                    }
+                    else
+                    {
+                    $metricPath = ($Config.MetricPath +'.' + ( $cleanNameOfSample  -replace $Config.NodeHostName,($Config.NodeHostName+'.dbengine.sql'))).ToLower()
+                    
+                    }
+                    
                     $metricsToSend[$metricPath] = $sample.Cookedvalue
+                    echo  $metricPath;
+                    $metricsTime[$metricPath] = $nowUtc
                 }
                 else
                 {
@@ -154,14 +183,100 @@ Function Start-StatsToGraphite
                 $filterStopWatch.Stop()
 
                 Write-Verbose "Job Execution Time To Get to Clean Metrics: $($filterStopWatch.Elapsed.TotalSeconds) seconds."
+				
+				
+            }
+            }
+            
+			}
+        
+             $sumOfelapsedtimerequest =0
+             $sumOfelapsedtime = 0
+             $addOnMetric =@{}
 
-            }# End for each sample loop
+             $responseKey = ""
+           foreach ($key in $metricsToSend.Keys)
+           { 
+	           if( $key.IndexOf("freemegabytes") -gt 0 )
+                {
+                     #$sumOfelapsedtime += $($metricsToSend[$key])
+               
+                    if($metricsToSend.ContainsKey(($key -replace "freemegabytes","freespace")) )
+                    {
+                    $freespace =  $metricsToSend[($key -replace "freemegabytes","freespace")]
+                    $freesmeg =  $metricsToSend[$key]
+                    $usedspace = $freesmeg* 100/$freespace - $freesmeg
+                    Write-Warning $usedspace
+                     
+                     $addOnMetric[($key -replace "freemegabytes","usedmegabytes")] =  $usedspace
+                     $metricsTime[($key -replace "freemegabytes","usedmegabytes")] = $nowUtc
+                    }
+                    else
+                    {
+                    Write-Warning  "Not found freespace"
+                    Write-Warning ($key -replace "freemegabytes","freespace")
+        
+                    }
+
+                }
+
+
+                if( $key.IndexOf("batchrespstatistics.elapsedtime.requests") -gt 0 )
+                {
+                $sumOfelapsedtimerequest+= $metricsToSend[$key]
+                }
+                
+                if( $key.IndexOf("batchrespstatistics.elapsedtime.total.ms") -gt 0 )
+                {
+                $sumOfelapsedtime+= $metricsToSend[$key]
+                }
+                
+           }
+
+           $metricsToSend += $addOnMetric
+           
+           if( $oldsumOfelapsedtimerequest -eq 0){
+           
+           
+              $oldsumOfelapsedtime = $sumOfelapsedtime
+               $oldsumOfelapsedtimerequest = $sumOfelapsedtimerequest
+           Write-Warning $sumOfelapsedtimerequest
+           Write-Warning $sumOfelapsedtime
+           Write-Warning "================"
+
+           }
+           else
+           {
+                $difsumOfelapsedtime  = $sumOfelapsedtime - $oldsumOfelapsedtime 
+                $difsumOfelapsedtimerequest =  $sumOfelapsedtimerequest -  $oldsumOfelapsedtimerequest
+                if($difsumOfelapsedtime -lt 0 -or $difsumOfelapsedtimerequest -lt 0){}
+                else{
+              #  $x = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                $tempMetricName = $Config.MetricPath +'.' +$Config.NodeHostName.ToLower() +'.dbengine.sql.sqlserver.batchrespstatistics.responsetime' 
+                 $metricsToSend[$tempMetricName]  =$difsumOfelapsedtime /$difsumOfelapsedtimerequest
+                  $metricsTime[$tempMetricName] = $nowUtc
+
+                          Write-Warning $difsumOfelapsedtime
+           Write-Warning $difsumOfelapsedtimerequest
+           Write-Warning "=================================================================="
+
+               $oldsumOfelapsedtime = $sumOfelapsedtime
+               $oldsumOfelapsedtimerequest = $sumOfelapsedtimerequest
+             #    $x = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+         
+           }
+           }
+
+    
+            	
         }# end if ExcludePerfCounters
 
         if($SqlMetrics) {
             # Loop through each SQL Server
             foreach ($sqlServer in $Config.MSSQLServers)
             {
+				if($sqlServer.ElapseTime -gt $sqlServer.MSSQLMetricTimeSpan.TotalMilliseconds)
+				{
                 Write-Verbose "Running through SQLServer $($sqlServer.ServerInstance)"
                 # Loop through each query for the SQL server
                 foreach ($query in $sqlServer.Queries)
@@ -191,9 +306,10 @@ Function Start-StatsToGraphite
                             $sqlresult = Invoke-SQLCmd @sqlCmdParams
 
                             # Build the MetricPath that will be used to send the metric to Graphite
-                            $metricPath = $Config.MSSQLMetricPath + '.' + $query.MetricName
-
+                            $metricPath = $sqlServer.MSSQLMetricPath + '.' + $query.MetricName
+                          
                             $metricsToSend[$metricPath] = $sqlresult[0]
+                            $metricsTime[$metricPath] = $nowUtc
                         }
 
                         Write-Verbose ('SQL Metric Collection Execution Time: ' + $commandMeasurement.TotalSeconds + ' seconds')
@@ -204,21 +320,79 @@ Function Start-StatsToGraphite
                         throw "An error occurred with processing the SQL Query. $exceptionText"
                     }
                 } #end foreach Query
+				
+				
+				foreach ($StoreProcedure in $sqlServer.StoreProcedures)
+                {
+                    Write-Verbose "Current Query $($StoreProcedure.StoreName)"
+					
+					$sqlCmdParams = @{
+                        'ServerInstance' = $sqlServer.ServerInstance;
+                        'Database' = $StoreProcedure.Database;
+                        'Query' = 'EXEC '+$StoreProcedure.StoreName;
+                        'ConnectionTimeout' = 2;#$Config.MSSQLConnectTimeout;
+                        'QueryTimeout' = 58;
+                    }
+
+					if (-not [string]::IsNullOrWhitespace($sqlServer.Username) `
+                        -and -not [string]::IsNullOrWhitespace($sqlServer.Password))
+                    {
+                        $sqlCmdParams['Username'] = $sqlServer.Username
+                        $sqlCmdParams['Password'] = $sqlServer.Password
+                    }
+					
+					try
+                    {
+                        $commandMeasurement = Measure-Command -Expression {
+                            $sqlresults = Invoke-SQLCmd @sqlCmdParams
+							foreach ($result in $sqlresults){
+							Write-Verbose ('metric name: '+$result[0] +' metric value: '+$result[1] +' time : '+$result[2] )
+							$metricPath = $result[0] +'&'+$result[2]
+                              if($metricPath.IndexOf("mssql{$}$sqlServer.ServerInstance") -gt 0)
+                              {
+                              $metricPath = $metricPath -replace "mssql{$}$sqlServer.ServerInstance","sqlserver"
+                              }
+                            $metricsToSend[$metricPath] = $result[1]
+                            
+                            $metricsTime[$metricPath] = $result[2]
+                            
+							
+                            
+							}
+                            # Build the MetricPath that will be used to send the metric to Graphite
+                            #$metricPath = $Config.MSSQLMetricPath + '.' + $query.MetricName
+
+                            #$metricsToSend[$metricPath] = $sqlresult[0]
+                        }
+
+                        Write-Verbose ('SQL Store ' + $commandMeasurement.TotalSeconds + ' seconds')
+                    }
+                    catch
+                    {
+					    $exceptionText = GetPrettyProblem $_
+						Write-Verbose ('Error ' + $exceptionText )
+                     
+                        throw "An error occurred with processing the SQL Query. $exceptionText"
+                    }
+					Write-Verbose ('Hello ' + $StoreProcedure.StoreName )
+                   
+                }
+				$sqlServer.ElapseTime =0
+				}
             } #end foreach SQL Server
         }#endif SqlMetrics
 
         # Send To Graphite Server
 
-        $sendBulkGraphiteMetricsParams = @{
+           $sendBulkGraphiteMetricsParams = @{
             "CarbonServer" = $Config.CarbonServer
             "CarbonServerPort" = $Config.CarbonServerPort
             "Metrics" = $metricsToSend
-            "DateTime" = $nowUtc
+            "DateTime" = $metricsTime
             "UDP" = $Config.SendUsingUDP
             "Verbose" = $Config.ShowOutput
             "TestMode" = $TestMode
         }
-
         Send-BulkGraphiteMetrics @sendBulkGraphiteMetricsParams
 
         # Reloads The Configuration File After the Loop so new counters can be added on the fly
@@ -228,12 +402,46 @@ Function Start-StatsToGraphite
 
         $iterationStopWatch.Stop()
         $collectionTime = $iterationStopWatch.Elapsed
-        $sleep = $Config.MetricTimeSpan.TotalMilliseconds - $collectionTime.TotalMilliseconds
+        
+        $timeNow = Get-Date 
+        $TimeDiff = New-TimeSpan  $timeNow $timeNext
+
+        if($TimeDiff.TotalSeconds -gt 0)
+        {
+        $sleep = $TimeDiff.TotalMilliseconds 
+        }
+        else
+        {
+        $sleep = 0
+        		write-Output("IT USE MORE THAN 1 MINUTES")
+        }
+
+		write-Output("Sleep" +$sleep)
+		
+		if($sleep -lt 0 )
+		{$sleep =0}
+		$elapseTime += $sleep+$collectionTime.TotalMilliseconds +10
+		foreach ($sqlServer in $Config.MSSQLServers)
+            {
+			$sqlServer.ElapseTime += $sleep+$collectionTime.TotalMilliseconds+10
+			}
+            foreach($PerformanceCounter in  $Config.PerformanceCounter)
+        {
+        
+        $PerformanceCounter.ElapseTime += $sleep+$collectionTime.TotalMilliseconds+10
+        }
+        
+			
         if ($Config.ShowOutput)
         {
             # Write To Console How Long Execution Took
             $VerboseOutPut = 'PerfMon Job Execution Time: ' + $collectionTime.TotalSeconds + ' seconds'
             Write-Output $VerboseOutPut
+			$LogTime = Get-Date -Format "MM-dd-yyyy_hh-mm-ss"
+			Write-Output "last Runtime :"+$LogTime
+			
         }
     }
 }
+
+
