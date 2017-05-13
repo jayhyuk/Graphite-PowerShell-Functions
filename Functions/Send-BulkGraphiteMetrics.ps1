@@ -55,7 +55,7 @@ function Send-BulkGraphiteMetrics
 
         [Parameter(Mandatory = $true,
                    ParameterSetName = 'Date Object')]
-        [datetime]$DateTime,
+        [hashtable]$DateTime,
 
         # Will Display what will be sent to Graphite but not actually send it
         [Parameter(Mandatory = $false)]
@@ -67,30 +67,40 @@ function Send-BulkGraphiteMetrics
     )
 
     # If Received A DateTime Object - Convert To UnixTime
-    if ($DateTime)
-    {
-        $utcDate = $DateTime.ToUniversalTime()
-        
-        # Convert to a Unix time without any rounding
-        [uint64]$UnixTime = [double]::Parse((Get-Date -Date $utcDate -UFormat %s))
-    }
-
+  
+    $cstzone = [System.TimeZoneInfo]::GetSystemTimeZones()
     # Create Send-To-Graphite Metric
-    [string[]]$metricStrings = @()
+   
+	$i=0;
+	  [string[]]$metricStrings = @()
     foreach ($key in $Metrics.Keys)
-    {
-        $metricStrings += $key + " " + $Metrics[$key] + " " + $UnixTime
+    { 
+	
+		$i++;
+
+          Write-Verbose ("Metric: " + $($Metrics[$key]).ToString())
+       Write-Verbose ("time : "+ ( [DateTime] $DateTime[$key]))
+        # Convert to a Unix time without any rounding
+        $unixEpochStart = new-object DateTime 1970,1,1,0,0,0,([DateTimeKind]::Utc)
+
+        [uint64]$UnixTime = [uint64](( [DateTime] $DateTime[$key]).ToUniversalTime() -   $unixEpochStart).TotalSeconds
+        $realMetrics = $key -split('&')
+        $metricStrings += $realMetrics[0] + " " + $($Metrics[$key]) + " " + $UnixTime
 
         Write-Verbose ("Metric Received: " + $metricStrings[-1])
-    }
 
+		  Write-Verbose ("send: " +$i)
+   
+    
+    }
+	
     $sendMetricsParams = @{
         "CarbonServer" = $CarbonServer
         "CarbonServerPort" = $CarbonServerPort
         "Metrics" = $metricStrings
         "IsUdp" = $UDP
         "TestMode" = $TestMode
-    }
+        }
+	SendMetrics @sendMetricsParams
 
-    SendMetrics @sendMetricsParams
 }
