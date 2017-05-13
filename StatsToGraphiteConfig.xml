@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Configuration>
 	<Graphite>
-		<CarbonServer>HK-CASMON-2001</CarbonServer>
-		<CarbonServerPort>56660</CarbonServerPort>
-		<MetricPath>hk.mdb.mdb</MetricPath>
+		<CarbonServer>yourCarbonServername</CarbonServer>
+		<CarbonServerPort>port</CarbonServerPort>
+		<MetricPath>metric</MetricPath>
 		<NodeHostName>$env:COMPUTERNAME</NodeHostName>
-		<MetricPath2>windows</MetricPath2>
+		<MetricPath2>metric infix</MetricPath2>
 		<MetricSendIntervalSeconds>60</MetricSendIntervalSeconds>
 		<SendUsingUDP>False</SendUsingUDP>
 	</Graphite>
