@@ -45,30 +45,50 @@ Function Import-XMLConfig
         $Config.NodeHostName = $env:COMPUTERNAME
     }
 
-    # Get Metric Send Interval From Config
-    [int]$Config.MetricSendIntervalSeconds = $xmlfile.Configuration.Graphite.MetricSendIntervalSeconds
-
+    
     # Convert Value in Configuration File to Bool for Sending via UDP
     [bool]$Config.SendUsingUDP = [System.Convert]::ToBoolean($xmlfile.Configuration.Graphite.SendUsingUDP)
 
-    # Convert Interval into TimeSpan
-    $Config.MetricTimeSpan = [timespan]::FromSeconds($Config.MetricSendIntervalSeconds)
 
     # What is the metric path
 
     $Config.MetricPath = $xmlfile.Configuration.Graphite.MetricPath
-
+    $Config.MetricPath2 = $xmlfile.Configuration.Graphite.MetricPath2
     # Convert Value in Configuration File to Bool for showing Verbose Output
     [bool]$Config.ShowOutput = [System.Convert]::ToBoolean($xmlfile.Configuration.Logging.VerboseOutput)
 
     # Create the Performance Counters Array
     $Config.Counters = @()
 
+
+    $Config.PerformanceCounter = @()     
+
+    foreach($PerformanceCounter in $xmlfile.Configuration.PerformancesMetrics.PerformanceCounter){
+    # Get Metric Send Interval From Config
+  
+    # Convert Interval into TimeSpan
+  
+    $Counters = @()
+    [int]$time = $PerformanceCounter.PerformanceCounters.MetricSendIntervalSecond
+    $timespan = [timespan]::FromSeconds($time)
+
+       
     # Load each row from the configuration file into the counter array
-    foreach ($counter in $xmlfile.Configuration.PerformanceCounters.Counter)
+    foreach ($Counter in $PerformanceCounter.PerformanceCounters.Counter)
     {
-        $Config.Counters += $counter.Name
+        $Counters += $Counter.Name
+        Write-Warning $Counter.Name
     }
+   
+ 
+    
+    $Config.PerformanceCounter += [pscustomobject]@{
+                Counters  = $Counters 
+                MetricTimeSpan = $timespan
+				ElapseTime =99999999999
+				}
+    }
+
 
     # Create the Metric Cleanup Hashtable
     $Config.MetricReplace = New-Object System.Collections.Specialized.OrderedDictionary
@@ -103,29 +123,51 @@ Function Import-XMLConfig
     try
     {
         # Below is for SQL Metrics
-        $Config.MSSQLMetricPath = $xmlfile.Configuration.MSSQLMetics.MetricPath
-        [int]$Config.MSSQLMetricSendIntervalSeconds = $xmlfile.Configuration.MSSQLMetics.MetricSendIntervalSeconds
-        $Config.MSSQLMetricTimeSpan = [timespan]::FromSeconds($Config.MSSQLMetricSendIntervalSeconds)
-        [int]$Config.MSSQLConnectTimeout = $xmlfile.Configuration.MSSQLMetics.SQLConnectionTimeoutSeconds
-        [int]$Config.MSSQLQueryTimeout = $xmlfile.Configuration.MSSQLMetics.SQLQueryTimeoutSeconds
+       
 
         # Create the Performance Counters Array
         $Config.MSSQLServers = @()     
      
-        foreach ($sqlServer in $xmlfile.Configuration.MSSQLMetics)
+      foreach ($msMetics in $xmlfile.Configuration.MSSQLMetics){
+       
+       [int]$Config.MSSQLMetricSendIntervalSeconds = $msMetics.MetricSendIntervalSeconds
+        $Config.MSSQLMetricTimeSpan = [timespan]::FromSeconds($Config.MSSQLMetricSendIntervalSeconds)
+        [int]$Config.MSSQLConnectTimeout = $msMetics.SQLConnectionTimeoutSeconds
+        [int]$Config.MSSQLQueryTimeout = $msMetics.SQLQueryTimeoutSeconds
+        foreach ($sqlServer in $msMetics.SQLServers.sqlServer)
         {
             # Load each SQL Server into an array
+			
+			if ( $sqlServer.PSObject.Properties.Match('Query').Count -gt 0){
+                $Queries = $sqlServer.Query
+				}
+				else{
+				$Queries = @()
+				}
+			if ( $sqlServer.PSObject.Properties.Match('StoreProcedure').Count -gt 0){
+				$StoreProcedures = $sqlServer.StoreProcedure
+				}	
+				else{
+				$StoreProcedures =@()
+				}
             $Config.MSSQLServers += [pscustomobject]@{
-                ServerInstance = $sqlServer.ServerInstance;
-                Username = $sqlServer.Username;
-                Password = $sqlServer.Password;
-                Queries = $sqlServer.Query
-            }
+                ServerInstance = $sqlServer.ServerInstance
+                Username = $sqlServer.Username
+                Password = $sqlServer.Password
+				Queries = $Queries
+				StoreProcedures = $StoreProcedures
+				MSSQLMetricPath = $msMetics.MetricPath
+				MSSQLMetricTimeSpan = [timespan]::FromSeconds($Config.MSSQLMetricSendIntervalSeconds)
+				ElapseTime =999999
+				}
+        }
         }
     }
     catch
     {
         Write-Verbose "SQL configuration has been left out, skipping."
+		 $exceptionText = GetPrettyProblem $_
+						Write-Verbose ('Error ' + $exceptionText )
     }
 
     Return $Config
@@ -179,11 +221,9 @@ function SendMetrics
                     $enc = new-object system.text.asciiencoding
                     foreach ($metricString in $Metrics)
                     {
-                        $Message += "$($metricString)`n"
+                        $Message += "$($metricString)`r"
                     }
                     $byte = $enc.GetBytes($Message)
-
-                    Write-Verbose "Byte Length: $($byte.Length)"
                     $Sent = $udpobject.Send($byte,$byte.Length)
                 }
 
@@ -191,12 +231,15 @@ function SendMetrics
             }
             else
             {
+			$sendCount = 1;
                 PSUsing ($socket = New-Object System.Net.Sockets.TCPClient) -ScriptBlock {
                     $socket.connect($CarbonServer, $CarbonServerPort)
                     PSUsing ($stream = $socket.GetStream()) {
                         PSUSing($writer = new-object System.IO.StreamWriter($stream)) {
                             foreach ($metricString in $Metrics)
                             {
+							$sendCount++;
+							Write-Verbose $sendCount+""+$metricString;
                                 $writer.WriteLine($metricString)
                             }
                             $writer.Flush()
